@@ -1,0 +1,25 @@
+name: VPSTerminal
+options:
+  bundleIdPrefix: com.vanooo
+targets:
+  VPSTerminal:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources: [Sources]
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: VPS
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UIUserInterfaceStyle: Dark
+        UIViewControllerBasedStatusBarAppearance: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.vanooo.vpsterminal
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: ""
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGNING_ALLOWED: "NO"

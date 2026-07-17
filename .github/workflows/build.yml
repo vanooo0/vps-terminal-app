@@ -1,0 +1,34 @@
+name: Build unsigned IPA
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate config from secret
+        run: |
+          test -n "${{ secrets.TERMINAL_URL }}"
+          printf 'let terminalURLString = "%s"\n' "${{ secrets.TERMINAL_URL }}" > Sources/Config.swift
+      - name: Install xcodegen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Build
+        run: |
+          xcodebuild -project VPSTerminal.xcodeproj -scheme VPSTerminal \
+            -sdk iphoneos -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+      - name: Package IPA
+        run: |
+          mkdir Payload
+          cp -r build/Build/Products/Release-iphoneos/VPSTerminal.app Payload/
+          zip -r VPSTerminal.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VPSTerminal-ipa
+          path: VPSTerminal.ipa

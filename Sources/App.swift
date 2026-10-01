@@ -56,21 +56,138 @@ final class KeepAlive {
     }
 }
 
+let bgColor = Color(red: 0x0D/255, green: 0x11/255, blue: 0x17/255)
+let amber = Color(red: 0xF0/255, green: 0xA3/255, blue: 0x5E/255)
+
+// Состояние загрузки страницы: пока она грузится — своя заставка вместо чёрного экрана.
+final class LoadState: ObservableObject {
+    @Published var loaded = false
+    @Published var failed = false
+}
+
 struct WebTerminal: UIViewRepresentable {
+    @ObservedObject var state: LoadState
+
+    func makeCoordinator() -> Coordinator { Coordinator(state: state) }
+
     func makeUIView(context: Context) -> WKWebView {
         let cfg = WKWebViewConfiguration()
         cfg.allowsInlineMediaPlayback = true
         let wv = WKWebView(frame: .zero, configuration: cfg)
-        wv.backgroundColor = .black
+        wv.backgroundColor = UIColor(red: 0x0D/255, green: 0x11/255, blue: 0x17/255, alpha: 1)
         wv.isOpaque = false
         wv.scrollView.bounces = false
         wv.scrollView.contentInsetAdjustmentBehavior = .never
+        wv.navigationDelegate = context.coordinator
+        wv.uiDelegate = context.coordinator
+        context.coordinator.webView = wv
         wv.load(URLRequest(url: TERMINAL_URL))
         return wv
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        let state: LoadState
+        weak var webView: WKWebView?
+        init(state: LoadState) {
+            self.state = state
+            super.init()
+            NotificationCenter.default.addObserver(forName: .retryLoad, object: nil, queue: .main) { [weak self] _ in self?.retry() }
+        }
+
+        func retry() {
+            state.failed = false
+            webView?.load(URLRequest(url: TERMINAL_URL))
+        }
+
+        // Страница сама рисует такую же заставку первым куском — меняемся с ней незаметно.
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.state.loaded = true }
+        }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { state.failed = true }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            state.loaded = false
+            state.failed = true
+        }
+        // Без этого iOS молча глушит окна страницы (подтверждения, ввод текста).
+        func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+            let a = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+            a.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler() })
+            present(a) ?? completionHandler()
+        }
+        func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+            let a = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+            a.addAction(UIAlertAction(title: "Отмена", style: .cancel) { _ in completionHandler(false) })
+            a.addAction(UIAlertAction(title: "Да", style: .default) { _ in completionHandler(true) })
+            present(a) ?? completionHandler(false)
+        }
+        func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+            let a = UIAlertController(title: nil, message: prompt, preferredStyle: .alert)
+            a.addTextField { $0.text = defaultText }
+            a.addAction(UIAlertAction(title: "Отмена", style: .cancel) { _ in completionHandler(nil) })
+            a.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler(a.textFields?.first?.text) })
+            present(a) ?? completionHandler(nil)
+        }
+        private func present(_ vc: UIViewController) -> Void? {
+            guard let root = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first?.rootViewController else { return nil }
+            var top = root
+            while let p = top.presentedViewController { top = p }
+            top.present(vc, animated: true)
+            return ()
+        }
+    }
 }
+
+struct Splash: View {
+    let failed: Bool
+    let retry: () -> Void
+    @State private var x: CGFloat = -1
+
+    var body: some View {
+        ZStack {
+            bgColor.ignoresSafeArea()
+            VStack(spacing: 18) {
+                Text(">_").font(.system(size: 44, weight: .bold, design: .monospaced)).foregroundColor(amber)
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color(white: 0.2)).frame(width: 120, height: 3)
+                    Capsule().fill(amber).frame(width: 48, height: 3).offset(x: x * 84 + 36)
+                }
+                .frame(width: 120, height: 3).clipped()
+                .opacity(failed ? 0 : 1)
+                Text(failed ? "нет связи с сервером — проверь Tailscale" : "загружаю…")
+                    .font(.system(size: 15, weight: .medium)).foregroundColor(Color(white: 0.55))
+                if failed {
+                    Button("Повторить", action: retry)
+                        .font(.system(size: 17, weight: .bold)).foregroundColor(.black)
+                        .padding(.horizontal, 28).padding(.vertical, 12)
+                        .background(amber).cornerRadius(10)
+                }
+            }
+        }
+        .onAppear { withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: false)) { x = 1 } }
+    }
+}
+
+struct RootView: View {
+    @StateObject private var state = LoadState()
+
+    var body: some View {
+        ZStack {
+            bgColor.ignoresSafeArea()
+            WebTerminal(state: state).ignoresSafeArea(.container, edges: .bottom)
+            if !state.loaded || state.failed {
+                Splash(failed: state.failed) {
+                    NotificationCenter.default.post(name: .retryLoad, object: nil)
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.3), value: state.loaded)
+    }
+}
+
+extension Notification.Name { static let retryLoad = Notification.Name("retryLoad") }
 
 @main
 struct VPSTerminalApp: App {
@@ -80,13 +197,9 @@ struct VPSTerminalApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ZStack {
-                Color.black.ignoresSafeArea()
-                WebTerminal()
-                    .ignoresSafeArea(.container, edges: .bottom)
-            }
-            .statusBarHidden(false)
-            .preferredColorScheme(.dark)
+            RootView()
+                .statusBarHidden(false)
+                .preferredColorScheme(.dark)
         }
     }
 }

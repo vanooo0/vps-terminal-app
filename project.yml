@@ -12,7 +12,8 @@ targets:
       properties:
         CFBundleDisplayName: VPS
         UIBackgroundModes: [audio]
-        UILaunchScreen: {}
+        UILaunchScreen:
+          UIColorName: LaunchBG
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UIUserInterfaceStyle: Dark
         UIViewControllerBasedStatusBarAppearance: true

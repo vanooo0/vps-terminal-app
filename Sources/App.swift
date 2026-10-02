@@ -73,6 +73,8 @@ struct WebTerminal: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let cfg = WKWebViewConfiguration()
         cfg.allowsInlineMediaPlayback = true
+        // кнопка «Вставить» на странице: берём текст прямо из буфера айфона, без системных окошек
+        cfg.userContentController.add(context.coordinator, name: "vpsPaste")
         let wv = WKWebView(frame: .zero, configuration: cfg)
         wv.backgroundColor = UIColor(red: 0x0D/255, green: 0x11/255, blue: 0x17/255, alpha: 1)
         wv.isOpaque = false
@@ -87,13 +89,22 @@ struct WebTerminal: UIViewRepresentable {
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         let state: LoadState
         weak var webView: WKWebView?
         init(state: LoadState) {
             self.state = state
             super.init()
             NotificationCenter.default.addObserver(forName: .retryLoad, object: nil, queue: .main) { [weak self] _ in self?.retry() }
+        }
+
+        func userContentController(_ uc: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == "vpsPaste", let wv = webView else { return }
+            let text = UIPasteboard.general.string ?? ""
+            let data = (try? JSONSerialization.data(withJSONObject: [text])) ?? Data("[\"\"]".utf8)
+            let arr = String(data: data, encoding: .utf8) ?? "[\"\"]"
+            // ответ — в ту же рамку, откуда нажали (VPS или встроенное окно ПК2)
+            wv.evaluateJavaScript("window.__nativePaste && window.__nativePaste(\(arr)[0])", in: message.frameInfo, in: .page) { _ in }
         }
 
         func retry() {
